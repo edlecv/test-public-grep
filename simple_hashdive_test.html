@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hashdive API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Hashdive API Test Tool</h1>
+        <p>This tool helps you test your Hashdive API key and see what data you can access.</p>
+        
+        <div class="input-group">
+            <label for="apiKey">Your API Key:</label>
+            <input type="password" id="apiKey" value="ecb19e0b9987e4d417ede921f1f7d2432b59044621f663e4e23935763dcc532" placeholder="Your Hashdive API key">
+        </div>
+        
+        <div class="input-group">
+            <label for="endpoint">Test Endpoint:</label>
+            <select id="endpoint">
+                <option value="/get_trades">Get Trades</option>
+                <option value="/markets">Markets</option>
+                <option value="/whale_activity">Whale Activity</option>
+                <option value="/ohlcv">OHLCV Data</option>
+            </select>
+        </div>
+        
+        <div class="input-group" id="userAddressGroup">
+            <label for="userAddress">Wallet Address (for trades):</label>
+            <input type="text" id="userAddress" placeholder="0x742d35Cc6635C0532925a3b8D5C3d8dd40a7B0EE" value="0x742d35Cc6635C0532925a3b8D5C3d8dd40a7B0EE">
+            <small>Example popular wallet address for testing</small>
+        </div>
+        
+        <button onclick="testAPI()">🚀 Test API</button>
+        
+        <div id="result" class="result" style="display:none;">
+            <h3>Result:</h3>
+            <pre id="resultContent"></pre>
+        </div>
+    </div>
+
+    <script>
+        async function testAPI() {
+            const apiKey = document.getElementById('apiKey').value;
+            const endpoint = document.getElementById('endpoint').value;
+            const userAddress = document.getElementById('userAddress').value;
+            const resultDiv = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+            
+            if (!apiKey) {
+                showResult('Please enter your API key', 'error');
+                return;
+            }
+            
+            // Show loading
+            showResult('🔄 Testing API...', 'info');
+            
+            try {
+                // Build URL with parameters
+                const baseUrl = 'https://hashdive.com/api';
+                let url = `${baseUrl}${endpoint}`;
+                
+                // Add parameters based on endpoint
+                const params = new URLSearchParams();
+                
+                // Try different auth methods
+                const authMethods = [
+                    () => {
+                        params.append('api_key', apiKey);
+                        if (endpoint === '/get_trades' && userAddress) {
+                            params.append('user_address', userAddress);
+                            params.append('page_size', '5');
+                        }
+                        return { url: `${url}?${params}`, headers: {} };
+                    },
+                    () => {
+                        if (endpoint === '/get_trades' && userAddress) {
+                            params.append('user_address', userAddress);
+                            params.append('page_size', '5');
+                        }
+                        return { 
+                            url: params.toString() ? `${url}?${params}` : url, 
+                            headers: { 'Authorization': `Bearer ${apiKey}` }
+                        };
+                    },
+                    () => {
+                        if (endpoint === '/get_trades' && userAddress) {
+                            params.append('user_address', userAddress);
+                            params.append('page_size', '5');
+                        }
+                        return { 
+                            url: params.toString() ? `${url}?${params}` : url, 
+                            headers: { 'X-API-Key': apiKey }
+                        };
+                    }
+                ];
+                
+                let lastError = null;
+                let success = false;
+                
+                for (let i = 0; i < authMethods.length; i++) {
+                    try {
+                        const { url: requestUrl, headers } = authMethods[i]();
+                        
+                        console.log(`Trying method ${i + 1}: ${requestUrl}`);
+                        console.log('Headers:', headers);
+                        
+                        const response = await fetch(requestUrl, {
+                            method: 'GET',
+                            headers: headers,
+                            mode: 'cors'
+                        });
+                        
+                        const data = await response.text();
+                        
+                        if (response.ok) {
+                            try {
+                                const jsonData = JSON.parse(data);
+                                showResult(`✅ Success with method ${i + 1}!\n\n${JSON.stringify(jsonData, null, 2)}`, 'success');
+                                success = true;
+                                break;
+                            } catch (e) {
+                                showResult(`✅ Success with method ${i + 1}!\n\nResponse: ${data}`, 'success');
+                                success = true;
+                                break;
+                            }
+                        } else {
+                            lastError = `Method ${i + 1} failed: ${response.status} - ${data}`;
+                            console.log(lastError);
+                        }
+                    } catch (error) {
+                        lastError = `Method ${i + 1} error: ${error.message}`;
+                        console.log(lastError);
+                    }
+                }
+                
+                if (!success) {
+                    showResult(`❌ All authentication methods failed.\n\nLast error: ${lastError}\n\nThis might be due to:\n1. CORS restrictions (try from a server)\n2. API key issues\n3. Different authentication required\n\nTry accessing the Hashdive website directly at hashdive.com`, 'error');
+                }
+                
+            } catch (error) {
+                showResult(`❌ Error: ${error.message}\n\nThis might be due to CORS restrictions. Try:\n1. Using this from a proper web server\n2. Using curl or Python instead\n3. Accessing hashdive.com directly`, 'error');
+            }
+        }
+        
+        function showResult(content, type) {
+            const resultDiv = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+            
+            resultDiv.style.display = 'block';
+            resultContent.textContent = content;
+            
+            resultDiv.className = 'result ' + type;
+            
+            // Scroll to result
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // Show/hide user address field based on endpoint
+        document.getElementById('endpoint').addEventListener('change', function() {
+            const userAddressGroup = document.getElementById('userAddressGroup');
+            if (this.value === '/get_trades') {
+                userAddressGroup.style.display = 'block';
+            } else {
+                userAddressGroup.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
