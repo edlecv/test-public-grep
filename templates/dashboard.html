@@ -315,7 +315,7 @@
     <div class="header">
         <h1>🚀 Hashdive Data Analysis Dashboard</h1>
         <p>Professional Polymarket data analysis using enriched HTTP API</p>
-        <small>Real-time data from hashdive.com API • Updated every minute</small>
+        <small>Real-time data from hashdive.com API • Fetches complete trading history • Updated every minute</small>
     </div>
     
     <div class="container">
@@ -340,17 +340,7 @@
                     <!-- Dynamic parameter fields -->
                     <div id="parameterFields"></div>
                     
-                    <div class="form-group">
-                        <label for="pageSize">Records Limit</label>
-                        <select id="pageSize">
-                            <option value="10">10 records</option>
-                            <option value="25">25 records</option>
-                            <option value="50" selected>50 records</option>
-                            <option value="100">100 records</option>
-                            <option value="500">500 records</option>
-                            <option value="1000">1000 records (max)</option>
-                        </select>
-                    </div>
+                    <!-- Records limit removed - now fetches maximum available data -->
                     
                     <div class="form-group">
                         <label for="format">Output Format</label>
@@ -401,13 +391,47 @@
             </div>
         </div>
         
+        <!-- Win Rate Analysis -->
+        <div class="card">
+            <h3>🎯 Win Rate Analysis</h3>
+            <div id="winRateSection" style="display: none;">
+                <div class="stats-grid" style="margin-bottom: 20px;">
+                    <div class="stat-card">
+                        <div class="stat-value" id="winRatePercentage">0%</div>
+                        <div class="stat-label">Win Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalTrades">0</div>
+                        <div class="stat-label">Total Trades</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="profitableTrades">0</div>
+                        <div class="stat-label">Profitable Trades</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="currentPnL">$0</div>
+                        <div class="stat-label">Current PnL</div>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <canvas id="pnlChart"></canvas>
+                </div>
+            </div>
+            <div id="winRateInstructions">
+                <div class="info">
+                    📊 To see win rate analysis, fetch user trades or positions data using the controls above.
+                </div>
+            </div>
+        </div>
+        
         <!-- Data Display -->
         <div class="card">
             <h3>📋 Data Analysis & Visualization</h3>
             
             <div class="tabs">
                 <div class="tab active" onclick="switchTab('table')">📊 Table</div>
-                <div class="tab" onclick="switchTab('chart')">📈 Charts</div>
+                <div class="tab" onclick="switchTab('chart')">📈 Standard Charts</div>
                 <div class="tab" onclick="switchTab('raw')">🔧 Raw Data</div>
             </div>
             
@@ -437,6 +461,7 @@
         let currentData = null;
         let apiCallCount = 0;
         let chart = null;
+        let pnlChart = null;
         
         // Endpoint configurations
         const endpointConfigs = {
@@ -584,14 +609,13 @@
         
         async function fetchData() {
             const endpoint = document.getElementById('endpoint').value;
-            const pageSize = document.getElementById('pageSize').value;
             const format = document.getElementById('format').value;
             const fetchBtn = document.getElementById('fetchBtn');
             
-            // Collect all parameter values
+            // Collect all parameter values - automatically fetch maximum available records
             const params = {
                 endpoint: endpoint,
-                page_size: parseInt(pageSize),
+                page_size: 1000, // Always fetch maximum available data
                 format: format
             };
             
@@ -693,6 +717,9 @@
             
             // Display chart if applicable
             displayChart(data);
+            
+            // Calculate and display win rate analysis
+            calculateAndDisplayWinRate(data);
         }
         
         function displayCSVData(csvContent) {
@@ -945,6 +972,363 @@
                 ctx.textAlign = 'center';
                 ctx.fillText('No numeric data available for charting', ctx.canvas.width / 2, ctx.canvas.height / 2);
             }
+        }
+        
+        function calculateAndDisplayWinRate(data) {
+            // Extract records from data
+            let records = [];
+            if (Array.isArray(data)) {
+                records = data;
+            } else if (data.trades && Array.isArray(data.trades)) {
+                records = data.trades;
+            } else if (data.positions && Array.isArray(data.positions)) {
+                records = data.positions;
+            } else if (data.data && Array.isArray(data.data)) {
+                records = data.data;
+            }
+            
+            // Check if this is trading/position data suitable for win rate analysis
+            if (records.length === 0) {
+                showWinRateError('No trading data available for win rate analysis.');
+                return;
+            }
+            
+            // Analyze data quality and structure
+            const dataAnalysis = analyzeTradeData(records);
+            
+            if (!dataAnalysis.isValid) {
+                showWinRateError(dataAnalysis.errorMessage);
+                return;
+            }
+            
+            // Calculate win rate metrics using real trade outcomes
+            const winRateResults = calculateRealWinRate(records, dataAnalysis);
+            
+            if (!winRateResults.isValid) {
+                showWinRateError(winRateResults.errorMessage);
+                return;
+            }
+            
+            // Show win rate section with real data
+            document.getElementById('winRateSection').style.display = 'block';
+            document.getElementById('winRateInstructions').style.display = 'none';
+            
+            // Update metrics with real calculated values
+            document.getElementById('winRatePercentage').textContent = winRateResults.winRate.toFixed(1) + '%';
+            document.getElementById('totalTrades').textContent = winRateResults.totalTrades.toLocaleString();
+            document.getElementById('profitableTrades').textContent = winRateResults.profitableTrades.toLocaleString();
+            document.getElementById('currentPnL').textContent = '$' + winRateResults.totalPnL.toFixed(2);
+            
+            // Create PnL chart with validated data
+            if (winRateResults.pnlData.length > 0) {
+                createPnLChart(winRateResults.labels, winRateResults.pnlData, winRateResults.winRate);
+            } else {
+                showWinRateError('Insufficient PnL data for accurate chart visualization.');
+            }
+        }
+        
+        function analyzeTradeData(records) {
+            const sampleSize = Math.min(5, records.length);
+            const sample = records.slice(0, sampleSize);
+            
+            let hasPnLData = 0;
+            let hasOutcomeData = 0;
+            let hasAmountData = 0;
+            let hasPriceData = 0;
+            let hasTimestampData = 0;
+            
+            // Analyze sample to understand data structure
+            sample.forEach(record => {
+                if (record.pnl !== undefined || record.profit !== undefined || record.profit_loss !== undefined || record.realized_pnl !== undefined) {
+                    hasPnLData++;
+                }
+                if (record.outcome !== undefined || record.side !== undefined || record.trade_type !== undefined) {
+                    hasOutcomeData++;
+                }
+                if (record.amount !== undefined || record.quantity !== undefined || record.size !== undefined) {
+                    hasAmountData++;
+                }
+                if (record.price !== undefined || record.avg_price !== undefined || record.execution_price !== undefined) {
+                    hasPriceData++;
+                }
+                if (record.timestamp !== undefined || record.created_at !== undefined || record.date !== undefined) {
+                    hasTimestampData++;
+                }
+            });
+            
+            // Determine if data is suitable for win rate calculation
+            const pnlCoverage = hasPnLData / sampleSize;
+            const outcomeCoverage = hasOutcomeData / sampleSize;
+            const amountCoverage = hasAmountData / sampleSize;
+            const priceCoverage = hasPriceData / sampleSize;
+            
+            // Data quality thresholds
+            if (pnlCoverage >= 0.8) {
+                return { isValid: true, dataType: 'pnl', confidence: 'high' };
+            } else if (outcomeCoverage >= 0.8 && amountCoverage >= 0.6 && priceCoverage >= 0.6) {
+                return { isValid: true, dataType: 'calculated', confidence: 'medium' };
+            } else if (hasTimestampData >= sampleSize * 0.8 && (amountCoverage >= 0.4 || priceCoverage >= 0.4)) {
+                return { isValid: true, dataType: 'basic', confidence: 'low' };
+            } else {
+                return {
+                    isValid: false,
+                    errorMessage: `Insufficient trading data for win rate analysis. Data contains ${Math.round(pnlCoverage * 100)}% PnL info, ${Math.round(outcomeCoverage * 100)}% outcome info, ${Math.round(amountCoverage * 100)}% amount info.`
+                };
+            }
+        }
+        
+        function calculateRealWinRate(records, dataAnalysis) {
+            let profitableTrades = 0;
+            let validTrades = 0;
+            let totalPnL = 0;
+            let pnlData = [];
+            let labels = [];
+            let cumulativePnL = 0;
+            
+            records.forEach((record, index) => {
+                let tradeResult = null;
+                let tradeValue = 0;
+                let isValidTrade = false;
+                
+                // Method 1: Direct PnL values (most reliable)
+                if (record.pnl !== undefined && record.pnl !== null && record.pnl !== '') {
+                    tradeValue = parseFloat(record.pnl) || 0;
+                    tradeResult = tradeValue > 0 ? 'win' : (tradeValue < 0 ? 'loss' : 'breakeven');
+                    isValidTrade = true;
+                } else if (record.profit !== undefined && record.profit !== null && record.profit !== '') {
+                    tradeValue = parseFloat(record.profit) || 0;
+                    tradeResult = tradeValue > 0 ? 'win' : (tradeValue < 0 ? 'loss' : 'breakeven');
+                    isValidTrade = true;
+                } else if (record.realized_pnl !== undefined && record.realized_pnl !== null && record.realized_pnl !== '') {
+                    tradeValue = parseFloat(record.realized_pnl) || 0;
+                    tradeResult = tradeValue > 0 ? 'win' : (tradeValue < 0 ? 'loss' : 'breakeven');
+                    isValidTrade = true;
+                }
+                
+                // Method 2: Calculate from trade details (Polymarket specific)
+                else if (record.side && record.price && record.amount && record.outcome !== undefined) {
+                    const amount = parseFloat(record.amount) || 0;
+                    const price = parseFloat(record.price) || 0;
+                    const side = record.side.toLowerCase();
+                    
+                    if (amount > 0 && price > 0) {
+                        // For Polymarket: buying "Yes" at low price and outcome is "Yes" = win
+                        // Or buying "No" at low price and outcome is "No" = win
+                        if (side === 'buy' || side === 'long') {
+                            if (record.outcome === 'Yes' || record.outcome === 1 || record.outcome === true) {
+                                tradeValue = amount * (1 - price); // Simplified calculation
+                                tradeResult = 'win';
+                            } else if (record.outcome === 'No' || record.outcome === 0 || record.outcome === false) {
+                                tradeValue = -amount * price;
+                                tradeResult = 'loss';
+                            }
+                        } else if (side === 'sell' || side === 'short') {
+                            if (record.outcome === 'No' || record.outcome === 0 || record.outcome === false) {
+                                tradeValue = amount * price;
+                                tradeResult = 'win';
+                            } else if (record.outcome === 'Yes' || record.outcome === 1 || record.outcome === true) {
+                                tradeValue = -amount * (1 - price);
+                                tradeResult = 'loss';
+                            }
+                        }
+                        if (tradeResult) isValidTrade = true;
+                    }
+                }
+                
+                // Method 3: Basic outcome analysis (least reliable, only if no other data)
+                else if (dataAnalysis.confidence === 'low' && record.outcome !== undefined) {
+                    // Only use this as last resort and mark as low confidence
+                    if (record.outcome === 'win' || record.outcome === 'Win' || record.outcome === 'WIN') {
+                        tradeResult = 'win';
+                        tradeValue = 1; // Placeholder value
+                        isValidTrade = true;
+                    } else if (record.outcome === 'loss' || record.outcome === 'Loss' || record.outcome === 'LOSS') {
+                        tradeResult = 'loss';
+                        tradeValue = -1; // Placeholder value
+                        isValidTrade = true;
+                    }
+                }
+                
+                // Only count valid trades with actual data
+                if (isValidTrade && tradeResult) {
+                    validTrades++;
+                    if (tradeResult === 'win') {
+                        profitableTrades++;
+                    }
+                    
+                    totalPnL += tradeValue;
+                    cumulativePnL += tradeValue;
+                    pnlData.push(cumulativePnL);
+                    
+                    // Create meaningful labels
+                    const timestamp = record.timestamp || record.created_at || record.date;
+                    const market = record.market_question || record.question || record.symbol || '';
+                    let label = `Trade ${validTrades}`;
+                    
+                    if (timestamp) {
+                        const date = new Date(timestamp * 1000 || timestamp);
+                        if (!isNaN(date.getTime())) {
+                            label = date.toLocaleDateString();
+                        }
+                    }
+                    if (market) {
+                        label += ` (${market.substring(0, 20)}...)`;
+                    }
+                    
+                    labels.push(label);
+                } else {
+                    console.warn('Skipping invalid trade record:', record);
+                }
+            });
+            
+            // Validate results
+            if (validTrades === 0) {
+                return {
+                    isValid: false,
+                    errorMessage: 'No valid trades found with sufficient data for win rate calculation. Please ensure your trades have PnL, outcome, or sufficient market data.'
+                };
+            }
+            
+            if (validTrades < records.length * 0.5) {
+                return {
+                    isValid: false,
+                    errorMessage: `Only ${validTrades} out of ${records.length} records contain sufficient data for accurate win rate analysis (${Math.round(validTrades/records.length*100)}% data quality).`
+                };
+            }
+            
+            // Calculate final metrics
+            const winRate = validTrades > 0 ? (profitableTrades / validTrades) * 100 : 0;
+            
+            return {
+                isValid: true,
+                winRate: winRate,
+                totalTrades: validTrades,
+                profitableTrades: profitableTrades,
+                totalPnL: totalPnL,
+                pnlData: pnlData,
+                labels: labels,
+                dataQuality: `${validTrades}/${records.length} trades analyzed`
+            };
+        }
+        
+        function showWinRateError(errorMessage) {
+            document.getElementById('winRateSection').style.display = 'none';
+            document.getElementById('winRateInstructions').style.display = 'block';
+            
+            // Update the instructions with specific error
+            const instructionsDiv = document.getElementById('winRateInstructions');
+            instructionsDiv.innerHTML = `
+                <div class="error">
+                    <strong>⚠️ Win Rate Analysis Error</strong><br>
+                    ${errorMessage}<br><br>
+                    <strong>Recommendations:</strong><br>
+                    • Ensure your data contains PnL fields (pnl, profit, realized_pnl)<br>
+                    • For positions data, try fetching trades data instead<br>
+                    • Verify the user address has sufficient trading history<br>
+                    • Check if trades are settled/completed
+                </div>
+            `;
+        }
+        
+        function createPnLChart(labels, pnlData, winRate) {
+            // Destroy existing PnL chart
+            if (pnlChart) {
+                pnlChart.destroy();
+            }
+            
+            const ctx = document.getElementById('pnlChart').getContext('2d');
+            
+            // Determine color based on final PnL
+            const finalPnL = pnlData[pnlData.length - 1] || 0;
+            const lineColor = finalPnL >= 0 ? 'rgba(39, 174, 96, 1)' : 'rgba(231, 76, 60, 1)';
+            const fillColor = finalPnL >= 0 ? 'rgba(39, 174, 96, 0.1)' : 'rgba(231, 76, 60, 0.1)';
+            
+            pnlChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Cumulative PnL ($)',
+                        data: pnlData,
+                        backgroundColor: fillColor,
+                        borderColor: lineColor,
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.2,
+                        pointBackgroundColor: lineColor,
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Trade Sequence'
+                            },
+                            ticks: {
+                                maxTicksLimit: 10
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Cumulative PnL ($)'
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.3)';
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        title: {
+                            display: true,
+                            text: `PnL Over Time - Win Rate: ${winRate.toFixed(1)}%`,
+                            font: {
+                                size: 16,
+                                weight: 'bold'
+                            },
+                            color: lineColor
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return `Trade #${context[0].dataIndex + 1}`;
+                                },
+                                label: function(context) {
+                                    const value = context.parsed.y;
+                                    return `Cumulative PnL: $${value.toFixed(2)}`;
+                                },
+                                afterLabel: function(context) {
+                                    const tradeIndex = context.dataIndex;
+                                    const currentPnL = context.parsed.y;
+                                    const previousPnL = tradeIndex > 0 ? pnlData[tradeIndex - 1] : 0;
+                                    const tradePnL = currentPnL - previousPnL;
+                                    return `This trade: ${tradePnL >= 0 ? '+' : ''}$${tradePnL.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
         
         function updateStats(result) {

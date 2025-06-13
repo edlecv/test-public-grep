@@ -1,13 +1,18 @@
 import requests
 import json
+import os
 from typing import Optional, Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class HashdiveClient:
     def __init__(self, api_key: str):
         self.base_url = "https://hashdive.com/api"
         self.api_key = api_key
         self.headers = {
-            "Authorization": f"Bearer {api_key}",
+            "x-api-key": api_key,
             "Content-Type": "application/json"
         }
     
@@ -70,8 +75,12 @@ class HashdiveClient:
         # For example: get_markets(), get_ohlcv(), get_whale_activity(), etc.
 
 def main():
-    # Your Hashdive API key
-    api_key = "ecb19e0b9987e4d417ede921f1f7d2432b59044621f663e4e23935763dcc532"
+    # Load API key from environment
+    api_key = os.getenv("HASHDIVE_API_KEY")
+    if not api_key:
+        print("Error: HASHDIVE_API_KEY not found in environment variables")
+        print("Please check your .env file")
+        return
     
     # Create client
     client = HashdiveClient(api_key)

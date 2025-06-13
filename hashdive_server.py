@@ -9,7 +9,7 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all domains
 
 # Your Hashdive API configuration
-HASHDIVE_API_KEY = "ecb19e0b9987e4d417ede921f1f7d2432b59044621f663e4e23935763dcc532"
+HASHDIVE_API_KEY = "ecb19e0b9907e4d417ede921f1f7d2432b590446211f603e4e239357634cc532"
 HASHDIVE_BASE_URL = "https://hashdive.com/api"
 
 class HashdiveClient:
