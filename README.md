@@ -1,125 +1,186 @@
-## py-clob-client
+# 🚀 Hashdive API Integration - Advanced Polymarket Trading Analysis
 
-<a href='https://pypi.org/project/py-clob-client'>
-    <img src='https://img.shields.io/pypi/v/py-clob-client.svg' alt='PyPI'/>
-</a>
+A comprehensive Flask-based dashboard for analyzing Polymarket trading data using the Hashdive enriched API, featuring sophisticated win rate calculations and real-time data visualization.
 
-Python client for the Polymarket CLOB. Full API documentation can be found [here](https://docs.polymarket.com/developers/dev-resources/main).
+## ✨ Key Features
+
+### 📊 **Advanced Win Rate Analysis**
+- **Zero Random Data**: Complete elimination of synthetic data generation
+- **Polymarket-Specific Logic**: Understands prediction market mechanics (Yes/No positions)
+- **Multi-Method Detection**: Analyzes PnL fields, trade outcomes, amounts, and prices
+- **Data Quality Scoring**: High/medium/low confidence based on data completeness
+- **Intelligent Validation**: Requires 50%+ valid trades for accurate analysis
+
+### 🔧 **Professional Dashboard**
+- **Real-Time Data**: Live integration with Hashdive API
+- **Maximum Data Retrieval**: Automatically fetches 1000 records (API maximum)
+- **Multiple Endpoints**: User trades, positions, OHLCV, whale trades, market search
+- **Interactive Charts**: Chart.js visualizations with PnL curves
+- **CSV Export**: Download trading data for external analysis
+
+### 🛡️ **Data Integrity**
+- **API-Only Data**: No fallback random data generation
+- **Robust Error Handling**: Detailed, actionable error messages
+- **Quality Validation**: Comprehensive data structure analysis
+- **Credit Optimization**: Maximum data per API request
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.7+
+- Hashdive API key
 
 ### Installation
 
-`pip install py-clob-client`
-
-Intended for use with Python 3.9
-
-### Requisites
-
-#### Allowances
-Adjusting and setting allowances is only required when using an EOA or a web3 wallet like MetaMask. If you sign in with a Magic link or email login, allowances are automatically configured for you during account creation.
-
-If you are interacting with the API with an EOA or web3/MetaMask wallet then correct token allowances must be set before orders can be placed. 
-The following mainnet (Polygon) allowances should be set by the funding (maker) address. For additional documentation please refer to the [API documentation](https://polymarket.github.io/slate-docs/#introduction).
-
-|                   token(s)                   |                   spender                    |                                  description                                   |
-| :------------------------------------------: | :------------------------------------------: | :----------------------------------------------------------------------------: |
-| `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` |            allow the CTF Exchange contract to transfer user's usdc             |
-| `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | `0xC5d563A36AE78145C45a50134d48A1215220f80a` |        allow the Neg Risk CTF Exchange contract to transfer user's usdc        |
-| `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | `0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296` |          allow the Neg Risk Adapter contract to transfer user's usdc           |
-| `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` |     allow the CTF Exchange contract to transfer user's conditional tokens      |
-| `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | `0xC5d563A36AE78145C45a50134d48A1215220f80a` | allow the Neg Risk CTF Exchange contract to transfer user's conditional tokens |
-| `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | `0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296` |   allow the Neg Risk Adapter contract to transfer user's conditional tokens    |
-
-See [this gist](https://gist.github.com/poly-rodr/44313920481de58d5a3f6d1f8226bd5e) for a an example of how to set these allowances for an account using python.
-
-### Usage
-
-```py
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs, OrderType
-from py_clob_client.order_builder.constants import BUY
-
-host: str = "https://clob.polymarket.com"
-key: str = "" #This is your Private Key. Export from reveal.polymarket.com or from your Web3 Application
-chain_id: int = 137 #No need to adjust this
-POLYMARKET_PROXY_ADDRESS: str = '' #This is the address you deposit/send USDC to to FUND your Polymarket account.
-
-#Select from the following 3 initialization options to matches your login method, and remove any unused lines so only one client is initialized.
-
-
-### Initialization of a client using a Polymarket Proxy associated with an Email/Magic account. If you login with your email use this example.
-client = ClobClient(host, key=key, chain_id=chain_id, signature_type=1, funder=POLYMARKET_PROXY_ADDRESS)
-
-### Initialization of a client using a Polymarket Proxy associated with a Browser Wallet(Metamask, Coinbase Wallet, etc)
-client = ClobClient(host, key=key, chain_id=chain_id, signature_type=2, funder=POLYMARKET_PROXY_ADDRESS)
-
-### Initialization of a client that trades directly from an EOA. 
-client = ClobClient(host, key=key, chain_id=chain_id)
-
-## Create and sign a limit order buying 5 tokens for 0.010c each
-#Refer to the Markets API documentation to locate a tokenID: https://docs.polymarket.com/developers/gamma-markets-api/get-markets
-
-client.set_api_creds(client.create_or_derive_api_creds()) 
-
-order_args = OrderArgs(
-    price=0.01,
-    size=5.0,
-    side=BUY,
-    token_id="", #Token ID you want to purchase goes here. 
-)
-signed_order = client.create_order(order_args)
-
-## GTC(Good-Till-Cancelled) Order
-resp = client.post_order(signed_order, OrderType.GTC)
-print(resp)
+1. **Clone the repository**
+```bash
+git clone https://github.com/edlecv/test-public-grep.git
+cd test-public-grep
 ```
 
-**See [examples](examples/) for more.**
+2. **Install dependencies**
+```bash
+pip install -r requirements_hashdive.txt
+```
 
-### Development
+3. **Configure API key**
+```bash
+# Create .env file
+echo "HASHDIVE_API_KEY=your_api_key_here" > .env
+```
 
-#### Install dependencies
+4. **Run the dashboard**
+```bash
+python hashdive_server.py
+```
+
+5. **Access dashboard**
+Open http://localhost:5000 in your browser
+
+## 📋 API Endpoints
+
+### 🏆 **Best for Win Rate Analysis**
+- **User Trades** - Complete trading history with outcomes and PnL data
+
+### ⚠️ **Limited for Win Rate**
+- **User Positions** - Current holdings (lacks complete trading history)
+
+### 📈 **Market Data**
+- **Last Price** - Current market prices
+- **OHLCV Candlesticks** - Market price charts
+- **Search Markets** - Market discovery
+- **Whale Trades** - Large trades from all users
+- **API Usage** - Usage statistics
+
+## 🎯 Win Rate Calculation Methods
+
+### **Method 1: Direct PnL (Most Reliable)**
+```python
+if record.pnl !== undefined:
+    tradeValue = parseFloat(record.pnl)
+    isProfitable = tradeValue > 0
+```
+
+### **Method 2: Calculated PnL (Polymarket Specific)**
+```python
+# For prediction markets
+if side === 'buy' and outcome === 'Yes':
+    tradeValue = amount * (1 - price)
+    isProfitable = true
+```
+
+### **Method 3: Basic Outcome (Last Resort)**
+```python
+if record.outcome === 'win':
+    isProfitable = true
+```
+
+## 📊 Data Quality Requirements
+
+- **Minimum 50% valid trades** for analysis
+- **PnL data preferred** for highest accuracy
+- **Trade outcomes required** for basic analysis
+- **Timestamps needed** for chronological ordering
+
+## 🔒 Security Features
+
+- **Environment Variables**: API keys stored securely
+- **Input Validation**: All user inputs validated
+- **Error Boundaries**: Graceful error handling
+- **No Data Leakage**: Zero random data generation
+
+## 📁 Project Structure
+
+```
+├── hashdive_server.py          # Main Flask application
+├── templates/
+│   └── dashboard.html          # Enhanced dashboard with win rate analysis
+├── hashdive_client.py          # API client implementation
+├── requirements_hashdive.txt   # Python dependencies
+├── SETUP_GUIDE.md             # Detailed setup instructions
+├── FIELD_EXPLANATIONS.md      # API field documentation
+├── WINRATE_CALCULATION_GUIDE.md # Win rate methodology
+└── test_*.py                  # Testing utilities
+```
+
+## 🧪 Testing
 
 ```bash
-make init
+# Test API connectivity
+python test_hashdive_api.py
+
+# Test win rate system
+python test_winrate_system.py
+
+# Test record ordering
+python test_record_order.py
 ```
 
-#### Tests
+## 📖 Documentation
 
+- **[Setup Guide](SETUP_GUIDE.md)** - Complete installation instructions
+- **[Field Explanations](FIELD_EXPLANATIONS.md)** - API field documentation
+- **[Win Rate Guide](WINRATE_CALCULATION_GUIDE.md)** - Calculation methodology
+- **[Installation Guide](INSTALLATION_GUIDE.md)** - System requirements
+
+## 🔧 Configuration
+
+### Environment Variables
 ```bash
-make fmt test
+HASHDIVE_API_KEY=your_api_key_here
 ```
 
-#### Publish
+### API Limits
+- **Maximum Records**: 1000 per request
+- **Rate Limits**: Respect Hashdive API limits
+- **Credit Usage**: Optimized for maximum data per credit
 
-Ref: https://pythonpackaging.info/07-Package-Release.html
+## 🤝 Contributing
 
-##### Installing the necessary libs
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-```bash
-pip install twine setuptools
-```
+## 📄 License
 
-##### Compiling the code
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-```bash
-python setup.py sdist
-```
+## 🙏 Acknowledgments
 
-##### Checking the generated code and publish
+- **Hashdive** for providing enriched Polymarket API
+- **Polymarket** for prediction market data
+- **Chart.js** for visualization capabilities
 
-```bash
-twine check dist/*
-# Checking dist/py_clob_client-0.22.0.tar.gz: PASSED
-```
+## 📞 Support
 
-```bash
-twine upload dist/*
+For issues and questions:
+1. Check the documentation files
+2. Review error messages in the dashboard
+3. Verify API key configuration
+4. Ensure sufficient trading data exists
 
-# Uploading distributions to https://upload.pypi.org/legacy/
-# Enter your API token:
-# Uploading py_clob_client-0.22.0.tar.gz
-# 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 31.9/31.9 kB • 00:00 • 29.6 MB/s
+---
 
-# View at:
-# https://pypi.org/project/py-clob-client/0.22.0/
-```
+**Built with ❤️ for accurate Polymarket trading analysis**
