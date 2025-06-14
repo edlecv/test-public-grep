@@ -382,6 +382,37 @@
                     </div>
                 </div>
                 
+                <!-- User Analytics Section -->
+                <div id="userAnalyticsSection" style="display: none; margin-top: 20px;">
+                    <h4 style="color: #2c3e50; margin-bottom: 15px;">👤 User Trading Analytics</h4>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="userTotalTrades">0</div>
+                            <div class="stat-label">Total Trades</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="userTradingPeriod">0</div>
+                            <div class="stat-label">Trading Days</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="userAvgTradesPerDay">0</div>
+                            <div class="stat-label">Avg Trades/Day</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="userEstimatedPnL">$0</div>
+                            <div class="stat-label">Estimated PnL</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="userFirstTrade">-</div>
+                            <div class="stat-label">First Trade</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="userLastTrade">-</div>
+                            <div class="stat-label">Last Trade</div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div id="statusMessage">
                     <div class="info">
                         🔗 Connected to Hashdive API<br>
@@ -624,7 +655,13 @@
             [...config.required, ...config.optional].forEach(param => {
                 const element = document.getElementById(param);
                 if (element && element.value) {
-                    params[param] = element.value;
+                    // Special handling for timestamp fields
+                    if (param.includes('timestamp') && element.type === 'datetime-local') {
+                        // Convert datetime-local to ISO format for server processing
+                        params[param] = element.value;
+                    } else {
+                        params[param] = element.value;
+                    }
                 }
             });
             
@@ -708,6 +745,11 @@
             // Update raw JSON tab
             document.getElementById('rawData').textContent = JSON.stringify(data, null, 2);
             
+            // Show data validation information if available
+            if (data && data.data_validation) {
+                showDataValidationInfo(data.data_validation);
+            }
+            
             // Handle CSV data
             if (data && data.raw_content && data.content_type && data.content_type.includes('csv')) {
                 displayCSVData(data.raw_content);
@@ -720,6 +762,48 @@
             
             // Calculate and display win rate analysis
             calculateAndDisplayWinRate(data);
+        }
+        
+        function showDataValidationInfo(validation) {
+            const container = document.getElementById('tableContainer');
+            
+            // Create validation info box
+            const validationBox = document.createElement('div');
+            validationBox.style.marginBottom = '15px';
+            validationBox.style.padding = '15px';
+            validationBox.style.borderRadius = '6px';
+            validationBox.style.border = '1px solid #ddd';
+            
+            if (validation.is_valid) {
+                validationBox.style.backgroundColor = '#d4edda';
+                validationBox.style.borderColor = '#c3e6cb';
+                validationBox.style.color = '#155724';
+                validationBox.innerHTML = `
+                    <strong>✅ Data Validation Passed</strong><br>
+                    <small>
+                        Quality: ${validation.data_quality.timestamp_coverage} timestamps,
+                        ${validation.data_quality.amount_coverage} amounts,
+                        ${validation.data_quality.price_coverage} prices
+                        ${validation.validation_details ? ` • ${validation.validation_details.total_trades} trades processed` : ''}
+                    </small>
+                `;
+            } else {
+                validationBox.style.backgroundColor = '#f8d7da';
+                validationBox.style.borderColor = '#f5c6cb';
+                validationBox.style.color = '#721c24';
+                validationBox.innerHTML = `
+                    <strong>⚠️ Data Quality Issues Detected</strong><br>
+                    ${validation.error_message}<br>
+                    <small>
+                        Quality: ${validation.data_quality.timestamp_coverage} timestamps,
+                        ${validation.data_quality.amount_coverage} amounts,
+                        ${validation.data_quality.price_coverage} prices
+                    </small>
+                `;
+            }
+            
+            // Insert at the beginning of the container
+            container.insertBefore(validationBox, container.firstChild);
         }
         
         function displayCSVData(csvContent) {
@@ -827,10 +911,30 @@
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
             
-            const keys = Object.keys(records[0]);
-            keys.forEach(key => {
+            // Prioritize important fields and formatted timestamps
+            const allKeys = Object.keys(records[0]);
+            const priorityKeys = ['trade_sequence', 'timestamp_readable', 'timestamp_formatted', 'market_question', 'side', 'amount_formatted', 'price'];
+            const otherKeys = allKeys.filter(key =>
+                !priorityKeys.includes(key) &&
+                !key.endsWith('_date') &&
+                !key.endsWith('_time') &&
+                key !== 'timestamp' &&
+                key !== 'amount'
+            );
+            
+            const displayKeys = [...priorityKeys.filter(key => allKeys.includes(key)), ...otherKeys];
+            
+            displayKeys.forEach(key => {
                 const th = document.createElement('th');
-                th.textContent = key.replace(/_/g, ' ').toUpperCase();
+                let headerText = key.replace(/_/g, ' ').toUpperCase();
+                
+                // Better header names for enhanced fields
+                if (key === 'timestamp_readable') headerText = 'TRADE DATE';
+                else if (key === 'timestamp_formatted') headerText = 'TIMESTAMP';
+                else if (key === 'amount_formatted') headerText = 'AMOUNT';
+                else if (key === 'trade_sequence') headerText = '#';
+                
+                th.textContent = headerText;
                 headerRow.appendChild(th);
             });
             
@@ -841,17 +945,32 @@
             const tbody = document.createElement('tbody');
             records.slice(0, 200).forEach(record => {
                 const row = document.createElement('tr');
-                keys.forEach(key => {
+                displayKeys.forEach(key => {
                     const td = document.createElement('td');
                     let value = record[key];
+                    
+                    // Special formatting for enhanced fields
+                    if (key === 'trade_sequence') {
+                        td.style.fontWeight = 'bold';
+                        td.style.color = '#3498db';
+                    } else if (key.includes('timestamp_readable')) {
+                        td.style.fontWeight = '500';
+                        td.style.color = '#2c3e50';
+                    } else if (key === 'amount_formatted') {
+                        td.style.fontWeight = '500';
+                        td.style.color = '#27ae60';
+                    } else if (key === 'side') {
+                        td.style.fontWeight = 'bold';
+                        td.style.color = value === 'buy' ? '#27ae60' : '#e74c3c';
+                    }
                     
                     // Format different types of values
                     if (typeof value === 'object' && value !== null) {
                         value = JSON.stringify(value);
                     } else if (typeof value === 'number') {
                         value = value.toLocaleString();
-                    } else if (typeof value === 'string' && value.length > 40) {
-                        value = value.substring(0, 40) + '...';
+                    } else if (typeof value === 'string' && value.length > 50 && !key.includes('timestamp')) {
+                        value = value.substring(0, 50) + '...';
                     }
                     
                     td.textContent = value || '-';
@@ -879,6 +998,23 @@
                 note.style.color = '#7f8c8d';
                 note.textContent = `Showing first 200 of ${records.length} records`;
                 container.appendChild(note);
+            }
+            
+            // Add analytics summary if available
+            if (data.user_analytics) {
+                const analyticsNote = document.createElement('div');
+                analyticsNote.style.marginTop = '10px';
+                analyticsNote.style.padding = '15px';
+                analyticsNote.style.backgroundColor = '#e8f5e8';
+                analyticsNote.style.borderRadius = '4px';
+                analyticsNote.style.color = '#2c3e50';
+                analyticsNote.innerHTML = `
+                    <strong>📊 Data Summary:</strong>
+                    ${data.user_analytics.total_trades} trades over ${data.user_analytics.trading_period_days} days
+                    (${data.user_analytics.avg_trades_per_day.toFixed(1)} trades/day average)
+                    ${data.user_analytics.estimated_total_pnl ? ` • Estimated PnL: $${data.user_analytics.estimated_total_pnl.toFixed(2)}` : ''}
+                `;
+                container.appendChild(analyticsNote);
             }
         }
         
@@ -1336,13 +1472,45 @@
             if (Array.isArray(result.data)) {
                 recordCount = result.data.length;
             } else if (result.data && typeof result.data === 'object') {
-                recordCount = 1;
+                // Check for enhanced data structure
+                if (result.data.trades && Array.isArray(result.data.trades)) {
+                    recordCount = result.data.trades.length;
+                } else if (result.data.data && Array.isArray(result.data.data)) {
+                    recordCount = result.data.data.length;
+                } else {
+                    recordCount = 1;
+                }
             }
             
             document.getElementById('totalRecords').textContent = recordCount.toLocaleString();
             document.getElementById('apiCalls').textContent = apiCallCount;
             document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
             document.getElementById('dataSource').textContent = result.endpoint.replace('_', ' ').toUpperCase();
+            
+            // Update user analytics if available
+            if (result.data && result.data.user_analytics) {
+                updateUserAnalytics(result.data.user_analytics);
+            }
+        }
+        
+        function updateUserAnalytics(analytics) {
+            // Show the user analytics section
+            document.getElementById('userAnalyticsSection').style.display = 'block';
+            
+            // Update analytics values
+            document.getElementById('userTotalTrades').textContent = analytics.total_trades.toLocaleString();
+            document.getElementById('userTradingPeriod').textContent = analytics.trading_period_days.toLocaleString();
+            document.getElementById('userAvgTradesPerDay').textContent = analytics.avg_trades_per_day.toFixed(1);
+            
+            // Format PnL with proper sign and color
+            const pnl = analytics.estimated_total_pnl || 0;
+            const pnlElement = document.getElementById('userEstimatedPnL');
+            pnlElement.textContent = `$${pnl.toFixed(2)}`;
+            pnlElement.style.color = pnl >= 0 ? '#27ae60' : '#e74c3c';
+            
+            // Format dates
+            document.getElementById('userFirstTrade').textContent = analytics.first_trade_date || '-';
+            document.getElementById('userLastTrade').textContent = analytics.last_trade_date || '-';
         }
         
         function showStatus(message, type) {
