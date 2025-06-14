@@ -399,8 +399,8 @@
                             <div class="stat-label">Avg Trades/Day</div>
                         </div>
                         <div class="stat-card">
-                            <div class="stat-value" id="userEstimatedPnL">$0</div>
-                            <div class="stat-label">Estimated PnL</div>
+                            <div class="stat-value" id="userTotalProfit">$0</div>
+                            <div class="stat-label">Total Profit</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-value" id="userFirstTrade">-</div>
@@ -462,7 +462,7 @@
             
             <div class="tabs">
                 <div class="tab active" onclick="switchTab('table')">📊 Table</div>
-                <div class="tab" onclick="switchTab('chart')">📈 Standard Charts</div>
+                <div class="tab" onclick="switchTab('chart')">📈 Profit Curve</div>
                 <div class="tab" onclick="switchTab('raw')">🔧 Raw Data</div>
             </div>
             
@@ -1012,7 +1012,7 @@
                     <strong>📊 Data Summary:</strong>
                     ${data.user_analytics.total_trades} trades over ${data.user_analytics.trading_period_days} days
                     (${data.user_analytics.avg_trades_per_day.toFixed(1)} trades/day average)
-                    ${data.user_analytics.estimated_total_pnl ? ` • Estimated PnL: $${data.user_analytics.estimated_total_pnl.toFixed(2)}` : ''}
+                    ${data.user_analytics.total_profit ? ` • Total Profit: $${data.user_analytics.total_profit.toFixed(2)}` : ''}
                 `;
                 container.appendChild(analyticsNote);
             }
@@ -1028,86 +1028,176 @@
             
             // Handle CSV data
             if (data && data.raw_content && data.content_type && data.content_type.includes('csv')) {
-                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-                ctx.fillStyle = '#7f8c8d';
-                ctx.font = '16px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('Chart view not available for CSV data', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                displayNoChartMessage(ctx, 'Profit curve not available for CSV data');
                 return;
             }
             
-            // Extract records from data
-            let records = [];
-            if (Array.isArray(data)) {
-                records = data;
-            } else if (data.trades && Array.isArray(data.trades)) {
-                records = data.trades;
-            } else if (data.positions && Array.isArray(data.positions)) {
-                records = data.positions;
-            } else if (data.data && Array.isArray(data.data)) {
-                records = data.data;
-            }
+            // Try to create profit curve chart
+            const profitResult = extractProfitCurveData(data);
             
-            if (records.length === 0) {
-                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-                ctx.fillStyle = '#7f8c8d';
-                ctx.font = '16px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('No data available for chart', ctx.canvas.width / 2, ctx.canvas.height / 2);
+            if (!profitResult.isValid) {
+                displayNoChartMessage(ctx, profitResult.errorMessage);
                 return;
             }
             
-            const sample = records[0];
-            const numericFields = Object.keys(sample).filter(key => 
-                typeof sample[key] === 'number' && !isNaN(sample[key])
-            );
-            
-            if (numericFields.length > 0) {
-                const field = numericFields[0];
-                const values = records.slice(0, 20).map(item => item[field]);
-                const labels = records.slice(0, 20).map((item, index) => 
-                    item.timestamp || item.date || item.symbol || item.market_question || `Record ${index + 1}`
-                );
+            // Create profit curve chart
+            createProfitCurveChart(ctx, profitResult.data);
+        }
+        
+        function extractProfitCurveData(data) {
+            // Check if we have enhanced data with profit calculations
+            if (data && data.user_analytics && data.user_analytics.profit_curve_data && data.user_analytics.profit_timestamps) {
+                const profitData = data.user_analytics.profit_curve_data;
+                const timestamps = data.user_analytics.profit_timestamps;
                 
-                chart = new Chart(ctx, {
-                    type: 'line',
+                if (profitData.length === 0 || timestamps.length === 0) {
+                    return {
+                        isValid: false,
+                        errorMessage: 'No profit data available - insufficient trade information for accurate calculation'
+                    };
+                }
+                
+                if (profitData.length !== timestamps.length) {
+                    return {
+                        isValid: false,
+                        errorMessage: 'Profit data integrity issue - timestamp and value count mismatch'
+                    };
+                }
+                
+                // Convert timestamps to readable labels
+                const labels = timestamps.map(ts => {
+                    const date = new Date(ts * 1000);
+                    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                });
+                
+                return {
+                    isValid: true,
                     data: {
                         labels: labels,
-                        datasets: [{
-                            label: field.replace(/_/g, ' ').toUpperCase(),
-                            data: values,
-                            backgroundColor: 'rgba(52, 152, 219, 0.2)',
-                            borderColor: 'rgba(52, 152, 219, 1)',
-                            borderWidth: 2,
-                            fill: true
-                        }]
+                        profitValues: profitData,
+                        startingProfit: profitData[0] || 0,
+                        finalProfit: profitData[profitData.length - 1] || 0,
+                        totalTrades: data.user_analytics.valid_trades || profitData.length
+                    }
+                };
+            }
+            
+            return {
+                isValid: false,
+                errorMessage: 'No profit calculation available - trades missing required fields (price, amount, side) for accurate profit computation'
+            };
+        }
+        
+        function createProfitCurveChart(ctx, chartData) {
+            const finalProfit = chartData.finalProfit;
+            const startingProfit = chartData.startingProfit;
+            
+            // Determine colors based on overall performance
+            const lineColor = finalProfit >= 0 ? 'rgba(39, 174, 96, 1)' : 'rgba(231, 76, 60, 1)';
+            const fillColor = finalProfit >= 0 ? 'rgba(39, 174, 96, 0.1)' : 'rgba(231, 76, 60, 0.1)';
+            const pointColor = finalProfit >= 0 ? 'rgba(39, 174, 96, 0.8)' : 'rgba(231, 76, 60, 0.8)';
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [{
+                        label: 'Cumulative Profit ($)',
+                        data: chartData.profitValues,
+                        backgroundColor: fillColor,
+                        borderColor: lineColor,
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.2,
+                        pointBackgroundColor: pointColor,
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
                     },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        },
-                        plugins: {
-                            legend: {
-                                display: true
-                            },
+                    scales: {
+                        x: {
                             title: {
                                 display: true,
-                                text: `${field.replace(/_/g, ' ').toUpperCase()} Over Time`
+                                text: 'Time',
+                                font: { weight: 'bold' }
+                            },
+                            ticks: {
+                                maxTicksLimit: 8
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Profit ($)',
+                                font: { weight: 'bold' }
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.4)';
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)';
+                                }
+                            },
+                            // Start from actual starting profit value
+                            beginAtZero: Math.abs(startingProfit) < 0.01
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        title: {
+                            display: true,
+                            text: `Profit Curve - ${chartData.totalTrades} Trades | Total Profit: $${finalProfit.toFixed(2)}`,
+                            font: {
+                                size: 16,
+                                weight: 'bold'
+                            },
+                            color: lineColor
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return `Trade #${context[0].dataIndex + 1}`;
+                                },
+                                label: function(context) {
+                                    const value = context.parsed.y;
+                                    return `Cumulative Profit: $${value.toFixed(2)}`;
+                                },
+                                afterLabel: function(context) {
+                                    const tradeIndex = context.dataIndex;
+                                    if (tradeIndex > 0) {
+                                        const currentProfit = context.parsed.y;
+                                        const previousProfit = chartData.profitValues[tradeIndex - 1];
+                                        const tradeProfit = currentProfit - previousProfit;
+                                        return `This trade: ${tradeProfit >= 0 ? '+' : ''}$${tradeProfit.toFixed(2)}`;
+                                    }
+                                    return `Starting from: $${context.parsed.y.toFixed(2)}`;
+                                }
                             }
                         }
                     }
-                });
-            } else {
-                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-                ctx.fillStyle = '#7f8c8d';
-                ctx.font = '16px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('No numeric data available for charting', ctx.canvas.width / 2, ctx.canvas.height / 2);
-            }
+                }
+            });
+        }
+        
+        function displayNoChartMessage(ctx, message) {
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            ctx.fillStyle = '#7f8c8d';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(message, ctx.canvas.width / 2, ctx.canvas.height / 2);
         }
         
         function calculateAndDisplayWinRate(data) {
@@ -1502,11 +1592,11 @@
             document.getElementById('userTradingPeriod').textContent = analytics.trading_period_days.toLocaleString();
             document.getElementById('userAvgTradesPerDay').textContent = analytics.avg_trades_per_day.toFixed(1);
             
-            // Format PnL with proper sign and color
-            const pnl = analytics.estimated_total_pnl || 0;
-            const pnlElement = document.getElementById('userEstimatedPnL');
-            pnlElement.textContent = `$${pnl.toFixed(2)}`;
-            pnlElement.style.color = pnl >= 0 ? '#27ae60' : '#e74c3c';
+            // Format profit with proper sign and color
+            const profit = analytics.total_profit || 0;
+            const profitElement = document.getElementById('userTotalProfit');
+            profitElement.textContent = `$${profit.toFixed(2)}`;
+            profitElement.style.color = profit >= 0 ? '#27ae60' : '#e74c3c';
             
             // Format dates
             document.getElementById('userFirstTrade').textContent = analytics.first_trade_date || '-';

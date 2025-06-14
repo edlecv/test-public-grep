@@ -361,6 +361,139 @@ def validate_trade_data_integrity(trades, timestamp_gte=None, timestamp_lte=None
         'validation_details': validation_details
     }
 
+def calculate_profit_curve(trades):
+    """
+    Calculate profit curve by tracking gains/losses from every trade.
+    Updated to handle various data formats from Hashdive API.
+    
+    Args:
+        trades (list): List of trade dictionaries
+        
+    Returns:
+        dict: Contains total_profit, profit_curve_data, and profit_timestamps
+    """
+    if not trades or len(trades) == 0:
+        return {
+            'is_valid': False,
+            'error_message': 'No trades available for profit calculation',
+            'summary': {
+                'total_profit': 0,
+                'profit_curve_data': [],
+                'profit_timestamps': [],
+                'valid_trades': 0,
+                'total_trades': 0
+            }
+        }
+    
+    # Sort trades by timestamp (oldest first for chronological calculation)
+    sorted_trades = sorted(trades, key=lambda x: get_trade_timestamp(x))
+    
+    cumulative_profit = 0
+    profit_curve = []
+    timestamps = []
+    valid_trades = 0
+    
+    print(f"Calculating profit for {len(sorted_trades)} trades...")
+    
+    # Print first trade structure to understand the data format
+    if len(sorted_trades) > 0:
+        print(f"Sample trade structure: {list(sorted_trades[0].keys())}")
+        first_trade = sorted_trades[0]
+        print(f"Sample values: price={first_trade.get('price')}, amount={first_trade.get('amount')}, side={first_trade.get('side')}")
+    
+    for i, trade in enumerate(sorted_trades):
+        try:
+            trade_profit = 0
+            timestamp = get_trade_timestamp(trade)
+            
+            # Method 1: Use direct profit/PnL fields if available
+            for profit_field in ['profit', 'pnl', 'profit_loss', 'realized_pnl']:
+                if profit_field in trade and trade[profit_field] is not None:
+                    try:
+                        trade_profit = float(trade[profit_field])
+                        if i < 5:  # Only print first 5 for debugging
+                            print(f"Trade {i+1}: Direct {profit_field} = ${trade_profit:.2f}")
+                        break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Method 2: Calculate from USD amount (actual field in Hashdive data)
+            if trade_profit == 0:
+                try:
+                    # Use usd_amount field which is the actual USD value of the trade
+                    usd_amount = trade.get('usd_amount', 0)
+                    side = trade.get('side', '').lower()
+                    
+                    if usd_amount and side:
+                        usd_value = float(usd_amount)
+                        
+                        if side == 'sell':
+                            # Selling = positive cash flow (money in)
+                            trade_profit = usd_value
+                            if i < 3:
+                                print(f"Trade {i+1}: SELL +${usd_value:.2f}")
+                        elif side == 'buy':
+                            # Buying = negative cash flow (money out)
+                            trade_profit = -usd_value
+                            if i < 3:
+                                print(f"Trade {i+1}: BUY -${usd_value:.2f}")
+                        
+                except (ValueError, TypeError, KeyError) as e:
+                    if i < 3:
+                        print(f"Trade {i+1}: Error with usd_amount - {e}")
+                    continue
+            
+            # Include ALL trades with valid timestamps
+            if timestamp > 0:
+                cumulative_profit += trade_profit
+                profit_curve.append(cumulative_profit)
+                timestamps.append(timestamp)
+                valid_trades += 1
+                if i < 3:  # Only print first 3 for debugging
+                    print(f"Trade {i+1}: Cumulative profit = ${cumulative_profit:.2f}")
+            else:
+                if i < 3:  # Only print first 3 for debugging
+                    print(f"Trade {i+1}: Skipped - no valid timestamp")
+                
+        except Exception as e:
+            print(f"Trade {i+1}: Exception - {e}")
+            continue
+    
+    print(f"Final calculation: {valid_trades} valid trades, total profit: ${cumulative_profit:.2f}")
+    
+    # Return results even if data quality is low - let user see what we can calculate
+    return {
+        'is_valid': valid_trades > 0,
+        'error_message': f'Only {valid_trades}/{len(sorted_trades)} trades had sufficient data' if valid_trades < len(sorted_trades) * 0.5 else None,
+        'summary': {
+            'total_profit': cumulative_profit,
+            'profit_curve_data': profit_curve,
+            'profit_timestamps': timestamps,
+            'valid_trades': valid_trades,
+            'total_trades': len(sorted_trades)
+        }
+    }
+
+def get_trade_timestamp(trade):
+    """Extract timestamp from trade data"""
+    timestamp_fields = ['timestamp', 'created_at', 'date', 'time']
+    for field in timestamp_fields:
+        if field in trade and trade[field]:
+            try:
+                ts = trade[field]
+                if isinstance(ts, (int, float)):
+                    return ts if ts < 1e10 else ts / 1000
+                elif isinstance(ts, str):
+                    try:
+                        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        return dt.timestamp()
+                    except:
+                        dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+                        return dt.timestamp()
+            except:
+                continue
+    return 0
+
 def enhance_trade_data(data):
     """Enhance trade data with better timestamp formatting and additional metrics"""
     if not data:
@@ -456,24 +589,245 @@ def enhance_trade_data(data):
         user_analytics['first_trade_date'] = earliest_timestamp.strftime('%Y-%m-%d')
         user_analytics['last_trade_date'] = latest_timestamp.strftime('%Y-%m-%d')
     
-    # Estimate PnL if possible
-    total_pnl = 0
-    pnl_count = 0
-    for record in enhanced_records:
-        pnl_fields = ['pnl', 'profit', 'profit_loss', 'realized_pnl']
-        for field in pnl_fields:
-            if field in record and record[field] is not None:
-                try:
-                    pnl_value = float(record[field])
-                    total_pnl += pnl_value
-                    pnl_count += 1
-                    break
-                except:
-                    continue
+    # ROBUST PROFIT CALCULATION - Handle actual API data structure
+    total_profit = 0
+    profit_curve_data = []
+    profit_timestamps = []
+    valid_trades = 0
+    positions = {}  # asset_id -> list of open positions
+    closed_positions = []  # Track completed trades for winrate
     
-    if pnl_count > 0:
-        user_analytics['estimated_total_pnl'] = total_pnl
-        user_analytics['avg_pnl_per_trade'] = total_pnl / pnl_count
+    # Sort records by timestamp for chronological processing
+    sorted_records = sorted(enhanced_records, key=lambda x: get_trade_timestamp(x))
+    
+    print(f"=== STARTING PROFIT CALCULATION FOR {len(sorted_records)} TRADES ===")
+    
+    # COMPREHENSIVE DATA STRUCTURE ANALYSIS
+    if len(sorted_records) > 0:
+        print(f"ANALYZING FIRST 3 TRADES FOR DATA STRUCTURE...")
+        
+        for idx in range(min(3, len(sorted_records))):
+            trade = sorted_records[idx]
+            print(f"\n--- TRADE {idx+1} COMPLETE STRUCTURE ---")
+            for key, value in trade.items():
+                # Handle long values that might cause display issues
+                if isinstance(value, str) and len(value) > 100:
+                    value_display = value[:100] + "..." + f" [LENGTH: {len(value)}]"
+                else:
+                    value_display = value
+                print(f"  {key}: {value_display}")
+        
+        # Check specifically for side and amount variations
+        side_variations = set()
+        amount_variations = {}
+        
+        for trade in sorted_records[:10]:  # Check first 10 trades
+            # Collect all possible side values
+            if 'side' in trade:
+                side_variations.add(str(trade['side']))
+            
+            # Collect all numeric fields that could be amounts
+            for key, value in trade.items():
+                if key.lower() in ['amount', 'usd_amount', 'price', 'value', 'cost', 'notional', 'quantity']:
+                    try:
+                        numeric_val = float(value) if value else 0
+                        if numeric_val > 0:
+                            if key not in amount_variations:
+                                amount_variations[key] = []
+                            amount_variations[key].append(numeric_val)
+                    except:
+                        continue
+        
+        print(f"\nSIDE VALUE VARIATIONS FOUND: {side_variations}")
+        print(f"AMOUNT FIELD VARIATIONS:")
+        for field, values in amount_variations.items():
+            avg_val = sum(values) / len(values) if values else 0
+            print(f"  {field}: {len(values)} trades, avg=${avg_val:.2f}")
+    
+    # Process each trade for profit calculation
+    for i, record in enumerate(sorted_records):
+        try:
+            timestamp = get_trade_timestamp(record)
+            if timestamp <= 0:
+                continue
+                
+            # Extract trade data using exact field names from raw data structure
+            usd_amount = record.get('usd_amount', 0)  # Direct field access
+            raw_side = record.get('side', '')
+            asset_id = record.get('asset_id', '')
+            
+            # Convert side values: "b" -> buy, "s" -> sell
+            side = None
+            if raw_side == 'b':
+                side = 'buy'
+            elif raw_side == 's':
+                side = 'sell'
+            
+            # Convert usd_amount to float
+            try:
+                usd_amount = float(usd_amount) if usd_amount else 0
+            except (ValueError, TypeError):
+                usd_amount = 0
+            
+            # Skip ONLY if absolutely no useful data (much more permissive)
+            if not (usd_amount or side or asset_id):
+                if i < 3:
+                    print(f"Trade {i+1}: SKIPPED - NO DATA AT ALL")
+                continue
+            
+            # Set defaults for missing data instead of skipping
+            if not usd_amount:
+                usd_amount = 0
+            if not side:
+                side = 'unknown'
+            if not asset_id:
+                asset_id = f'unknown_market_{i}'
+            
+            # Debug first few trades
+            if i < 5:
+                print(f"Trade {i+1}: {side.upper()} ${usd_amount:.2f} on {asset_id[:30]}...")
+            
+            # Initialize position tracking for this market
+            if asset_id not in positions:
+                positions[asset_id] = []
+            
+            # PREDICTION MARKET LOGIC
+            shares = float(record.get('shares', 0))
+            price_per_share = float(record.get('price', 0))
+            market_info = record.get('market_info', {})
+            is_resolved = market_info.get('resolved', False)
+            is_winner = market_info.get('is_winner', False)
+            outcome = market_info.get('outcome', '')
+            
+            cost_basis = shares * price_per_share  # What user paid
+            
+            if side == 'buy':
+                # BUY: Track position
+                position_data = {
+                    'shares': shares,
+                    'cost_basis': cost_basis,
+                    'price_per_share': price_per_share,
+                    'outcome': outcome,
+                    'timestamp': timestamp,
+                    'resolved': is_resolved,
+                    'is_winner': is_winner
+                }
+                positions[asset_id].append(position_data)
+                
+                # Calculate profit immediately for resolved markets
+                if is_resolved:
+                    if is_winner:
+                        # Winner: shares worth $1 each
+                        final_value = shares * 1.0
+                        position_profit = final_value - cost_basis
+                    else:
+                        # Loser: shares worth $0
+                        position_profit = 0 - cost_basis
+                    
+                    total_profit += position_profit
+                    profit_curve_data.append(total_profit)
+                    profit_timestamps.append(timestamp)
+                    
+                    # Track for winrate
+                    closed_positions.append({
+                        'profit': position_profit,
+                        'is_winner': is_winner,
+                        'asset_id': asset_id,
+                        'cost_basis': cost_basis,
+                        'final_value': shares * 1.0 if is_winner else 0,
+                        'timestamp': timestamp
+                    })
+                    
+                    if i < 5:
+                        status = "WON" if is_winner else "LOST"
+                        print(f"  → BUY (RESOLVED {status}): {shares} shares × ${price_per_share:.3f} = ${cost_basis:.2f} cost → ${position_profit:.2f} profit")
+                else:
+                    if i < 5:
+                        print(f"  → BUY (UNRESOLVED): {shares} shares × ${price_per_share:.3f} = ${cost_basis:.2f} cost")
+                        
+            elif side == 'sell':
+                # SELL: Early exit from position
+                if positions[asset_id]:
+                    buy_position = positions[asset_id].pop(0)
+                    sell_revenue = usd_amount
+                    position_profit = sell_revenue - buy_position['cost_basis']
+                    total_profit += position_profit
+                    profit_curve_data.append(total_profit)
+                    profit_timestamps.append(timestamp)
+                    
+                    closed_positions.append({
+                        'profit': position_profit,
+                        'is_winner': position_profit > 0,
+                        'asset_id': asset_id,
+                        'cost_basis': buy_position['cost_basis'],
+                        'final_value': sell_revenue,
+                        'timestamp': timestamp
+                    })
+                    
+                    if i < 5:
+                        print(f"  → SELL (EARLY EXIT): ${sell_revenue:.2f} revenue - ${buy_position['cost_basis']:.2f} cost = ${position_profit:.2f} profit")
+            
+            valid_trades += 1
+            
+            if i < 5:
+                print(f"  → Running Total Profit: ${total_profit:.2f} ({len(profit_curve_data)} curve points)")
+                
+        except Exception as e:
+            if i < 5:
+                print(f"Trade {i+1} ERROR: {e}")
+            continue
+    
+    # Calculate winrate metrics
+    total_closed_positions = len(closed_positions)
+    winning_positions = sum(1 for pos in closed_positions if pos['is_winner'])
+    win_rate = (winning_positions / total_closed_positions * 100) if total_closed_positions > 0 else 0
+    
+    # Report remaining open positions
+    open_positions_count = sum(len(positions[asset_id]) for asset_id in positions)
+    
+    print(f"=== FINAL CALCULATION RESULTS ===")
+    print(f"Total Profit: ${total_profit:.2f}")
+    print(f"Closed Positions: {total_closed_positions}")
+    print(f"Winning Positions: {winning_positions}")
+    print(f"Win Rate: {win_rate:.1f}%")
+    print(f"Valid Trades Processed: {valid_trades}/{len(sorted_records)}")
+    print(f"Profit Curve Data Points: {len(profit_curve_data)}")
+    print(f"Remaining Open Positions: {open_positions_count}")
+    
+    # Count different trade types for diagnostics
+    buy_count = sum(1 for r in sorted_records if r.get('side') == 'b')
+    sell_count = sum(1 for r in sorted_records if r.get('side') == 's')
+    resolved_count = sum(1 for r in sorted_records if r.get('market_info', {}).get('resolved', False))
+    
+    print(f"=== TRADE BREAKDOWN ===")
+    print(f"Buy Orders: {buy_count}")
+    print(f"Sell Orders: {sell_count}")
+    print(f"Resolved Markets: {resolved_count}")
+    print(f"Unresolved Markets: {len(sorted_records) - resolved_count}")
+    print(f"Trades Contributing to Profit Curve: {len(profit_curve_data)}")
+    print(f"Missing from Profit Curve: {len(sorted_records) - len(profit_curve_data)}")
+    
+    # If we have very few valid trades, show error
+    if valid_trades < len(sorted_records) * 0.1:  # Less than 10% processed
+        print(f"ERROR: Only processed {valid_trades}/{len(sorted_records)} trades successfully")
+        return enhance_trade_data({
+            'error': f'Data processing failed - only {valid_trades}/{len(sorted_records)} trades had valid data structure',
+            'debug_info': {
+                'sample_fields': list(sorted_records[0].keys()) if sorted_records else [],
+                'sample_side_values': [r.get('side') for r in sorted_records[:5]],
+                'sample_amount_fields': [r.get('usd_amount') for r in sorted_records[:5]]
+            }
+        })
+    
+    # Update user analytics with calculated profit and winrate data
+    user_analytics['total_profit'] = total_profit
+    user_analytics['profit_curve_data'] = profit_curve_data
+    user_analytics['profit_timestamps'] = profit_timestamps
+    user_analytics['valid_trades'] = valid_trades
+    user_analytics['closed_positions'] = total_closed_positions
+    user_analytics['winning_positions'] = winning_positions
+    user_analytics['win_rate'] = win_rate
+    user_analytics['average_profit_per_trade'] = total_profit / total_closed_positions if total_closed_positions > 0 else 0
     
     # Return enhanced data with analytics
     if isinstance(data, list):
@@ -518,6 +872,8 @@ def fetch_data():
             if not user_address:
                 return jsonify({'error': 'User address required for trades endpoint'}), 400
             
+            print(f"Fetching trades for user: {user_address}")
+            
             # Get timestamp filters from request
             timestamp_gte = data.get('timestamp_gte')
             timestamp_lte = data.get('timestamp_lte')
@@ -530,6 +886,23 @@ def fetch_data():
                 timestamp_lte=timestamp_lte,
                 format=format_type
             )
+            
+            print(f"Raw API result keys: {result.keys() if isinstance(result, dict) else 'Not a dict'}")
+            if isinstance(result, dict) and 'trades' in result:
+                print(f"Number of trades found: {len(result['trades'])}")
+                if len(result['trades']) > 0:
+                    print("\n=== RAW DATA STRUCTURE ANALYSIS ===")
+                    for i in range(min(3, len(result['trades']))):
+                        trade = result['trades'][i]
+                        print(f"\n--- RAW TRADE {i+1} ---")
+                        for key, value in trade.items():
+                            # Handle potentially long strings
+                            if isinstance(value, str) and len(value) > 50:
+                                display_value = value[:50] + f"... [len={len(value)}]"
+                            else:
+                                display_value = value
+                            print(f"  {key}: {display_value}")
+                    print("\n=== END RAW DATA STRUCTURE ===")
             
             # Add optional validation info but never block data display
             if 'error' not in result:
